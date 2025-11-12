@@ -3,19 +3,21 @@
 
 #include "framework.h"
 #include "Amazon_Chess.h"
+#include <windowsx.h>
+#include "board.h"
 
 #define MAX_LOADSTRING 100
-
-// 全局变量:
-HINSTANCE hInst;                                // 当前实例
-WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
-WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 
 // 此代码模块中包含的函数的前向声明:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+
+// 全局变量:
+HINSTANCE hInst;                                // 当前实例
+WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
+WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -25,16 +27,26 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
-    // TODO: 在此处放置代码。
+    // Initialize COM for WIC
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     // 初始化全局字符串 - 使用固定标题和窗口类名 for clarity
     wcscpy_s(szTitle, MAX_LOADSTRING, L"Game of the Amazons: Conquer and Win!");
     wcscpy_s(szWindowClass, MAX_LOADSTRING, L"AmazonChessWindowClass");
     MyRegisterClass(hInstance);
 
-    // 执行应用程序初始化: (InitInstance 已被更新以创建全屏窗口)
+    // Create device-independent board resources
+    HRESULT hr = Board_CreateDeviceIndependentResources();
+    if (FAILED(hr))
+    {
+        MessageBoxW(nullptr, L"Failed to initialize graphics libraries (Direct2D/DirectWrite/WIC). The application may not render correctly.", L"Initialization Error", MB_ICONERROR | MB_OK);
+    }
+
+    // 执行应用程序初始化:
     if (!InitInstance (hInstance, nCmdShow))
     {
+        Board_Cleanup();
+        CoUninitialize();
         return FALSE;
     }
 
@@ -52,10 +64,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         }
     }
 
+    Board_Cleanup();
+    CoUninitialize();
     return (int) msg.wParam;
 }
-
-
 
 //
 //  函数: MyRegisterClass()
@@ -97,20 +109,15 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
-   // Create a borderless fullscreen window by using the screen dimensions
-   int screenW = GetSystemMetrics(SM_CXSCREEN);
-   int screenH = GetSystemMetrics(SM_CYSCREEN);
-
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_POPUP,
-      0, 0, screenW, screenH, nullptr, nullptr, hInstance, nullptr);
+   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
       return FALSE;
    }
 
-   // Show as normal (window already covers the full screen)
-   ShowWindow(hWnd, SW_SHOW);
+   ShowWindow(hWnd, SW_SHOWMAXIMIZED);
    UpdateWindow(hWnd);
 
    return TRUE;
@@ -147,15 +154,51 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
         break;
+    case WM_SIZE:
+        {
+            Board_OnResize(LOWORD(lParam), HIWORD(lParam));
+            return 0;
+        }
+        break;
+    case WM_MOUSELEAVE:
+        {
+            Board_OnMouseLeave();
+            ShowCursor(TRUE); // restore system cursor when leaving
+        }
+        break;
+    case WM_MOUSEMOVE:
+        {
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+            Board_OnMouseMove(x, y);
+            // hide system cursor inside window and track leave
+            ShowCursor(FALSE);
+            TRACKMOUSEEVENT tme = {};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hWnd;
+            TrackMouseEvent(&tme);
+            InvalidateRect(hWnd, nullptr, FALSE);
+        }
+        break;
+    case WM_LBUTTONDOWN:
+        {
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+            Board_OnLButtonDown(x, y);
+            InvalidateRect(hWnd, nullptr, FALSE);
+        }
+        break;
     case WM_PAINT:
         {
+            Board_Render(hWnd);
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
-            // TODO: 在此处添加使用 hdc 的任何绘图代码...
             EndPaint(hWnd, &ps);
         }
         break;
     case WM_DESTROY:
+        Board_Cleanup();
         PostQuitMessage(0);
         break;
     default:

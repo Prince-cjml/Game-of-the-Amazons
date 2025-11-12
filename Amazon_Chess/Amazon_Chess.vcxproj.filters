@@ -27,9 +27,21 @@
     <ClInclude Include="Amazon_Chess.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="board.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Mouse.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Amazon_Chess.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="board.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="Mouse.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
