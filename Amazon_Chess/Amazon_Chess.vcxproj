@@ -126,6 +126,8 @@
     <ClInclude Include="Amazon_Chess.h" />
     <ClInclude Include="board.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="game.h" />
+    <ClInclude Include="menu.h" />
     <ClInclude Include="Mouse.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
@@ -133,6 +135,8 @@
   <ItemGroup>
     <ClCompile Include="Amazon_Chess.cpp" />
     <ClCompile Include="board.cpp" />
+    <ClCompile Include="game.cpp" />
+    <ClCompile Include="menu.cpp" />
     <ClCompile Include="Mouse.cpp" />
   </ItemGroup>
   <ItemGroup>

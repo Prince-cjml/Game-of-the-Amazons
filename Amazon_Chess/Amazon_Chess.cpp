@@ -5,6 +5,8 @@
 #include "Amazon_Chess.h"
 #include <windowsx.h>
 #include "board.h"
+#include "menu.h"
+#include "game.h"
 
 #define MAX_LOADSTRING 100
 
@@ -18,6 +20,202 @@ INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 HINSTANCE hInst;                                // 当前实例
 WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
+
+// Application mode: show menu first
+enum AppMode { MODE_MENU = 0, MODE_GAME = 1 };
+static AppMode g_appMode = MODE_MENU;
+
+// callback to allow board to request returning to menu
+static void ReturnToMenu()
+{
+    g_appMode = MODE_MENU;
+    // tell menu to show Resume option
+    Menu_SetHasResume(true);
+}
+
+// NewGame dialog result
+struct NewGameOptions
+{
+    bool accepted;
+    bool opponentIsAI; // true = AI (default), false = Human
+    int boardSize;     // 8 or 10 (default 8)
+    int difficulty;    // 0=Easy,1=Intermediate,2=Expert (shown but disabled)
+    bool aiFirst;      // true if AI moves first (AI is black), default false (Player first)
+};
+
+// control IDs
+enum {
+    NG_ID_OK = 1001,
+    NG_ID_CANCEL,
+    NG_ID_OPP_AI,
+    NG_ID_OPP_HUMAN,
+    NG_ID_BS_8,
+    NG_ID_BS_10,
+    NG_ID_DIFF_EASY,
+    NG_ID_DIFF_INTER,
+    NG_ID_DIFF_EXPERT,
+    NG_ID_AI_PLAYERFIRST,
+    NG_ID_AI_AIFIRST
+};
+
+static LRESULT CALLBACK NewGameDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    NewGameOptions* popts = (NewGameOptions*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+    if (msg == WM_CREATE)
+    {
+        // store pointer passed via CreateWindow lpParam
+        CREATESTRUCT* cs = (CREATESTRUCT*)lParam;
+        popts = (NewGameOptions*)cs->lpCreateParams;
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)popts);
+
+        RECT rc; GetClientRect(hwnd, &rc);
+        int dlgW = rc.right - rc.left;
+        int dlgH = rc.bottom - rc.top;
+        int left = 12, top = 12;
+
+        // Opponent radio buttons
+        CreateWindowW(L"STATIC", L"Opponent:", WS_CHILD | WS_VISIBLE, left, top, 80, 20, hwnd, nullptr, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"AI", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON | WS_GROUP, left+90, top, 60, 20, hwnd, (HMENU)NG_ID_OPP_AI, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"Human", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON, left+160, top, 80, 20, hwnd, (HMENU)NG_ID_OPP_HUMAN, hInst, nullptr);
+
+        top += 30;
+        // Board size radio buttons
+        CreateWindowW(L"STATIC", L"Board size:", WS_CHILD | WS_VISIBLE, left, top, 80, 20, hwnd, nullptr, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"8x8", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, left+90, top, 60, 20, hwnd, (HMENU)NG_ID_BS_8, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"10x10", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, left+160, top, 80, 20, hwnd, (HMENU)NG_ID_BS_10, hInst, nullptr);
+
+        top += 34;
+        // Difficulty radio buttons (shown only when AI selected)
+        CreateWindowW(L"STATIC", L"AI difficulty:", WS_CHILD | WS_VISIBLE, left, top, 100, 20, hwnd, nullptr, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"Easy", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, left+110, top, 80, 20, hwnd, (HMENU)NG_ID_DIFF_EASY, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"Intermediate", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_TABSTOP, left+200, top, 110, 20, hwnd, (HMENU)NG_ID_DIFF_INTER, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"Expert", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, left+110, top+24, 80, 20, hwnd, (HMENU)NG_ID_DIFF_EXPERT, hInst, nullptr);
+
+        // AI Turn Order radio buttons
+        CreateWindowW(L"STATIC", L"AI order:", WS_CHILD | WS_VISIBLE, left, top+54, 100, 20, hwnd, nullptr, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"Player first", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, left+110, top+54, 100, 20, hwnd, (HMENU)NG_ID_AI_PLAYERFIRST, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"AI first", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, left+220, top+54, 80, 20, hwnd, (HMENU)NG_ID_AI_AIFIRST, hInst, nullptr);
+
+        // OK / Cancel
+        CreateWindowW(L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, dlgW-180, dlgH-40, 80, 28, hwnd, (HMENU)NG_ID_OK, hInst, nullptr);
+        CreateWindowW(L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, dlgW-90, dlgH-40, 80, 28, hwnd, (HMENU)NG_ID_CANCEL, hInst, nullptr);
+
+        // set defaults: AI, 8x8, Intermediate, Player first
+        CheckRadioButton(hwnd, NG_ID_OPP_AI, NG_ID_OPP_HUMAN, NG_ID_OPP_AI);
+        CheckRadioButton(hwnd, NG_ID_BS_8, NG_ID_BS_10, NG_ID_BS_8);
+        CheckRadioButton(hwnd, NG_ID_DIFF_EASY, NG_ID_DIFF_EXPERT, NG_ID_DIFF_INTER);
+        CheckRadioButton(hwnd, NG_ID_AI_PLAYERFIRST, NG_ID_AI_AIFIRST, NG_ID_AI_PLAYERFIRST);
+        // difficulty controls enabled because AI is default
+        EnableWindow(GetDlgItem(hwnd, NG_ID_DIFF_EASY), TRUE);
+        EnableWindow(GetDlgItem(hwnd, NG_ID_DIFF_INTER), TRUE);
+        EnableWindow(GetDlgItem(hwnd, NG_ID_DIFF_EXPERT), TRUE);
+
+        if (popts)
+            *popts = { false, true, 8, 1, false };
+        return 0;
+    }
+
+    if (msg == WM_COMMAND)
+    {
+        int id = LOWORD(wParam);
+        // respond to opponent selection to enable/disable difficulty radios
+        if (id == NG_ID_OPP_AI || id == NG_ID_OPP_HUMAN)
+        {
+            BOOL aiSelected = (IsDlgButtonChecked(hwnd, NG_ID_OPP_AI) == BST_CHECKED);
+            EnableWindow(GetDlgItem(hwnd, NG_ID_DIFF_EASY), aiSelected);
+            EnableWindow(GetDlgItem(hwnd, NG_ID_DIFF_INTER), aiSelected);
+            EnableWindow(GetDlgItem(hwnd, NG_ID_DIFF_EXPERT), aiSelected);
+            // enable/disable AI order radios as well
+            EnableWindow(GetDlgItem(hwnd, NG_ID_AI_PLAYERFIRST), aiSelected);
+            EnableWindow(GetDlgItem(hwnd, NG_ID_AI_AIFIRST), aiSelected);
+            // if switched to AI and none of difficulty checked, default to Intermediate
+            if (aiSelected && IsDlgButtonChecked(hwnd, NG_ID_DIFF_EASY) != BST_CHECKED && IsDlgButtonChecked(hwnd, NG_ID_DIFF_INTER) != BST_CHECKED && IsDlgButtonChecked(hwnd, NG_ID_DIFF_EXPERT) != BST_CHECKED)
+            {
+                CheckRadioButton(hwnd, NG_ID_DIFF_EASY, NG_ID_DIFF_EXPERT, NG_ID_DIFF_INTER);
+            }
+            return 0;
+        }
+
+        if (id == NG_ID_OK || id == NG_ID_CANCEL)
+        {
+            popts = (NewGameOptions*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+            if (popts)
+            {
+                if (id == NG_ID_OK)
+                {
+                    popts->accepted = true;
+                    popts->opponentIsAI = (IsDlgButtonChecked(hwnd, NG_ID_OPP_AI) == BST_CHECKED);
+                    if (IsDlgButtonChecked(hwnd, NG_ID_BS_8) == BST_CHECKED) popts->boardSize = 8;
+                    else popts->boardSize = 10;
+                    if (popts->opponentIsAI)
+                    {
+                        if (IsDlgButtonChecked(hwnd, NG_ID_DIFF_EASY) == BST_CHECKED) popts->difficulty = 0;
+                        else if (IsDlgButtonChecked(hwnd, NG_ID_DIFF_INTER) == BST_CHECKED) popts->difficulty = 1;
+                        else popts->difficulty = 2;
+                        // AI order
+                        popts->aiFirst = (IsDlgButtonChecked(hwnd, NG_ID_AI_AIFIRST) == BST_CHECKED);
+                    }
+                    else
+                    {
+                        popts->difficulty = -1; // not applicable
+                        popts->aiFirst = false;
+                    }
+                }
+                else
+                {
+                    popts->accepted = false;
+                }
+            }
+            DestroyWindow(hwnd);
+            return 0;
+        }
+    }
+
+    if (msg == WM_DESTROY)
+    {
+        // Do not post quit here; dialog destroy should just return control to caller
+        return 0;
+    }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+static NewGameOptions ShowNewGameDialog(HWND parent)
+{
+    NewGameOptions opts = { false, true, 8, 1, false };
+
+    WNDCLASS wc = {0};
+    wc.lpfnWndProc = NewGameDlgProc;
+    wc.hInstance = hInst;
+    wc.lpszClassName = L"NewGameDlgClass";
+    RegisterClass(&wc);
+
+    int dlgW = 380, dlgH = 250;
+    RECT pr; GetClientRect(parent, &pr);
+    int px = pr.right/2 - dlgW/2;
+    int py = pr.bottom/2 - dlgH/2;
+
+    HWND hDlg = CreateWindowEx(WS_EX_DLGMODALFRAME, wc.lpszClassName, L"New Game", WS_POPUPWINDOW | WS_CAPTION | WS_SYSMENU,
+        px, py, dlgW, dlgH, parent, nullptr, hInst, &opts);
+    if (!hDlg)
+    {
+        UnregisterClass(wc.lpszClassName, hInst);
+        return opts;
+    }
+
+    ShowWindow(hDlg, SW_SHOW);
+
+    // Modal loop: run until dialog destroyed
+    MSG msg;
+    while (IsWindow(hDlg) && GetMessage(&msg, nullptr, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
+
+    UnregisterClass(wc.lpszClassName, hInst);
+    return opts;
+}
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -42,13 +240,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         MessageBoxW(nullptr, L"Failed to initialize graphics libraries (Direct2D/DirectWrite/WIC). The application may not render correctly.", L"Initialization Error", MB_ICONERROR | MB_OK);
     }
 
+    // Create menu device-independent resources (menu shown first)
+    hr = Menu_CreateDeviceIndependentResources();
+    if (FAILED(hr))
+    {
+        // non-fatal; menu will try to create resources when rendering
+    }
+
     // 执行应用程序初始化:
     if (!InitInstance (hInstance, nCmdShow))
     {
         Board_Cleanup();
+        Menu_Cleanup();
         CoUninitialize();
         return FALSE;
     }
+
+    // register callback so board can return to menu
+    Board_SetModeChangeCallback(ReturnToMenu);
 
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_AMAZONCHESS));
 
@@ -65,6 +274,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
 
     Board_Cleanup();
+    Menu_Cleanup();
     CoUninitialize();
     return (int) msg.wParam;
 }
@@ -157,22 +367,34 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_SIZE:
         {
             Board_OnResize(LOWORD(lParam), HIWORD(lParam));
+            Menu_OnResize(LOWORD(lParam), HIWORD(lParam));
             return 0;
         }
         break;
     case WM_MOUSELEAVE:
         {
-            Board_OnMouseLeave();
-            ShowCursor(TRUE); // restore system cursor when leaving
+            if (g_appMode == MODE_GAME)
+            {
+                Board_OnMouseLeave();
+            }
+            // restore system cursor when leaving
+            SetCursor(LoadCursor(nullptr, IDC_ARROW));
         }
         break;
     case WM_MOUSEMOVE:
         {
             int x = GET_X_LPARAM(lParam);
             int y = GET_Y_LPARAM(lParam);
-            Board_OnMouseMove(x, y);
-            // hide system cursor inside window and track leave
-            ShowCursor(FALSE);
+            if (g_appMode == MODE_MENU)
+            {
+                Menu_OnMouseMove(x, y);
+            }
+            else
+            {
+                Board_OnMouseMove(x, y);
+            }
+            // keep system cursor visible
+            SetCursor(LoadCursor(nullptr, IDC_ARROW));
             TRACKMOUSEEVENT tme = {};
             tme.cbSize = sizeof(tme);
             tme.dwFlags = TME_LEAVE;
@@ -185,13 +407,65 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         {
             int x = GET_X_LPARAM(lParam);
             int y = GET_Y_LPARAM(lParam);
-            Board_OnLButtonDown(x, y);
+            if (g_appMode == MODE_MENU)
+            {
+                MenuAction act = Menu_OnLButtonDown(x, y);
+                if (act == MENU_ACTION_START)
+                {
+                    // If menu shows Resume, treat Start as resume; otherwise open New Game dialog
+                    if (Menu_HasResume())
+                    {
+                        g_appMode = MODE_GAME; // resume
+                    }
+                    else
+                    {
+                        NewGameOptions opts = ShowNewGameDialog(hWnd);
+                        if (opts.accepted)
+                        {
+                            // apply options to game logic
+                            Game_Init(opts.boardSize, opts.opponentIsAI, opts.difficulty, opts.aiFirst);
+                            g_appMode = MODE_GAME;
+                            // starting a new game should hide "Resume"
+                            Menu_SetHasResume(false);
+                        }
+                    }
+                }
+                else if (act == MENU_ACTION_NEWGAME)
+                {
+                    NewGameOptions opts = ShowNewGameDialog(hWnd);
+                    if (opts.accepted)
+                    {
+                        Game_Init(opts.boardSize, opts.opponentIsAI, opts.difficulty, opts.aiFirst);
+                        g_appMode = MODE_GAME;
+                        Menu_SetHasResume(false);
+                    }
+                }
+                else if (act == MENU_ACTION_HELP)
+                {
+                    // TODO: open documentation (e.g., ShellExecute)
+                }
+                else if (act == MENU_ACTION_LOAD)
+                {
+                    // TODO: implement load flow
+                }
+            }
+            else
+            {
+                Board_OnLButtonDown(x, y);
+            }
             InvalidateRect(hWnd, nullptr, FALSE);
         }
         break;
     case WM_PAINT:
         {
-            Board_Render(hWnd);
+            if (g_appMode == MODE_MENU)
+            {
+                Menu_Render(hWnd);
+            }
+            else
+            {
+                Board_Render(hWnd);
+            }
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hWnd, &ps);
             EndPaint(hWnd, &ps);
@@ -199,6 +473,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
     case WM_DESTROY:
         Board_Cleanup();
+        Menu_Cleanup();
         PostQuitMessage(0);
         break;
     default:
