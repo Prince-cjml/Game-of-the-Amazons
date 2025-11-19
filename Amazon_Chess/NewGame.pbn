@@ -1,0 +1,25 @@
+﻿BoardSize:8
+OpponentAI:0
+AIFirst:0
+
+[B] A3 D3 E4
+[W] C8 G4 E2
+[B] H3 F3 F5
+[W] F8 B4 C3
+[B] C1 A3 A5
+[W] A6 C4 D4
+[B] D3 E3 D3
+[W] H6 H3 G2
+[B] E3 H6 H4
+[W] G4 G7 G6
+[B] H6 H7 H8
+[W] G7 G8 G7
+[B] H7 H5 H6
+[W] H3 G4 G5
+[B] F3 G3 F4
+[W] B4 B5 B4
+[B] F1 B1 B3
+[W] B5 C6 A4
+[B] G3 F2 E3
+[W] G4 G3 F3
+[B] F2 F1 E1

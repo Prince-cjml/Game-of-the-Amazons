@@ -7,6 +7,10 @@
 #include "board.h"
 #include "menu.h"
 #include "game.h"
+#include "save_load.h"
+#include <vector>
+#include <commdlg.h>
+#include <sstream>
 
 #define MAX_LOADSTRING 100
 
@@ -447,7 +451,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 }
                 else if (act == MENU_ACTION_LOAD)
                 {
-                    // TODO: implement load flow
+                    // show Open File dialog for .pbn files
+                    WCHAR szFile[MAX_PATH] = {};
+                    OPENFILENAMEW ofn = {};
+                    ofn.lStructSize = sizeof(ofn);
+                    ofn.hwndOwner = hWnd;
+                    ofn.lpstrFilter = L"Amazons Chess Game Record (*.pbn)\0*.pbn\0All Files (*.*)\0*.*\0";
+                    ofn.lpstrFile = szFile;
+                    ofn.nMaxFile = MAX_PATH;
+                    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+                    ofn.lpstrDefExt = L"pbn";
+                    if (GetOpenFileNameW(&ofn))
+                    {
+                        std::vector<std::wstring> lines;
+                        int fileBoardSize = 8; bool fileOppIsAI = true; bool fileAIFirst = false;
+                        if (LoadHistoryFromFile(szFile, lines, fileBoardSize, fileOppIsAI, fileAIFirst))
+                        {
+                            // reinit game using header values
+                            Game_Init(fileBoardSize, fileOppIsAI, 1, fileAIFirst);
+                            // replay moves
+                            for (const auto &entry : lines)
+                            {
+                                if (entry.empty()) continue;
+                                size_t pos = entry.find(L"] ");
+                                if (pos == std::wstring::npos) continue;
+                                std::wstring rest = entry.substr(pos + 2);
+                                std::wstringstream ss(rest);
+                                std::wstring a,b,c;
+                                if (!(ss >> a >> b >> c)) continue;
+                                if (a.size() < 2 || b.size() < 2 || c.size() < 2) continue;
+                                int fromC = a[0] - L'A';
+                                int fromR = _wtoi(a.substr(1).c_str()) - 1;
+                                int toC = b[0] - L'A';
+                                int toR = _wtoi(b.substr(1).c_str()) - 1;
+                                int arrowC = c[0] - L'A';
+                                int arrowR = _wtoi(c.substr(1).c_str()) - 1;
+                                Game_MakeMove(fromR, fromC, toR, toC, arrowR, arrowC);
+                            }
+                            // switch to game interface
+                            g_appMode = MODE_GAME;
+                            Menu_SetHasResume(false);
+                        }
+                        else
+                        {
+                            MessageBoxW(hWnd, L"Failed to load file.", L"Load Error", MB_OK | MB_ICONERROR);
+                        }
+                    }
                 }
             }
             else

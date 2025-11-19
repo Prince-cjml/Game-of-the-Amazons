@@ -62,10 +62,6 @@ static bool g_widgetVisible = false;
 static D2D1_RECT_F g_widgetRect = D2D1::RectF();
 static D2D1_RECT_F g_btnMenuRect = D2D1::RectF();
 static D2D1_RECT_F g_btnSaveRect = D2D1::RectF();
-static D2D1_RECT_F g_sliderRect = D2D1::RectF();
-static D2D1_RECT_F g_sliderTrackRect = D2D1::RectF(); // actual track used for interaction
-static float g_bgmVolume = 0.6f; // 0.0 - 1.0
-static bool g_draggingSlider = false;
 
 // menu button (window top-right)
 static D2D1_RECT_F g_menuButtonRectWindow = D2D1::RectF();
@@ -125,7 +121,6 @@ void Board_StartNewGame(int boardSize, bool opponentIsAI, int aiDifficulty)
     g_aiDifficulty = (aiDifficulty >= 0) ? aiDifficulty : 1;
     g_hoverRow = -1; g_hoverCol = -1;
     g_widgetVisible = false;
-    g_draggingSlider = false;
     // reset selection
     g_selectState = SELECT_IDLE;
     g_selFromR = g_selFromC = g_selToR = g_selToC = -1;
@@ -622,9 +617,7 @@ void Board_Render(HWND hwnd)
         g_btnMenuRect = D2D1::RectF(g_widgetRect.left + btnPad, g_widgetRect.top + btnPad, g_widgetRect.left + btnPad + leftBtnW, g_widgetRect.top + btnPad + btnH);
         // save button (right)
         g_btnSaveRect = D2D1::RectF(g_widgetRect.left + btnPad + leftBtnW + (innerW * 0.05f), g_widgetRect.top + btnPad, g_widgetRect.left + btnPad + leftBtnW + (innerW * 0.05f) + rightBtnW, g_widgetRect.top + btnPad + btnH);
-        // slider area below
-        g_sliderRect = D2D1::RectF(g_widgetRect.left + btnPad, g_widgetRect.top + btnPad + btnH + 12.0f, g_widgetRect.right - btnPad, g_widgetRect.top + btnPad + btnH + 28.0f);
-
+        
         // draw menu (rounded)
         float corner = 12.0f; // smoother corners
         g_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(g_btnMenuRect, corner, corner), g_pHoverBrush.Get());
@@ -641,54 +634,6 @@ void Board_Render(HWND hwnd)
             g_pRenderTarget->DrawTextW(L"Save", 4, tfBtn.Get(), g_btnSaveRect, g_pLineBrush.Get());
         else if (g_pTextFormatCenter)
             g_pRenderTarget->DrawTextW(L"Save", 4, g_pTextFormatCenter.Get(), g_btnSaveRect, g_pLineBrush.Get());
-
-        // allocate space for Volume label on left
-        float labelW = 28.0f;
-        D2D1_RECT_F labelRect = D2D1::RectF(g_widgetRect.left + btnPad, g_sliderRect.top, g_widgetRect.left + btnPad + labelW, g_sliderRect.bottom);
-        // create a small text format so 'Vol' fits on one line
-        if (g_pDWriteFactory)
-        {
-            ComPtr<IDWriteTextFormat> tfLabel;
-            // use a slightly larger fixed font for the Vol label so it's readable
-            float labelFontSize = 12.0f;
-            if (SUCCEEDED(g_pDWriteFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, labelFontSize, L"en-us", &tfLabel)))
-            {
-                tfLabel->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-                tfLabel->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                tfLabel->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-                g_pRenderTarget->DrawTextW(L"Vol", 3, tfLabel.Get(), labelRect, g_pLineBrush.Get());
-            }
-            else
-            {
-                if (g_pTextFormatTrailing)
-                    g_pRenderTarget->DrawTextW(L"Vol", 3, g_pTextFormatTrailing.Get(), labelRect, g_pLineBrush.Get());
-            }
-        }
-        else
-        {
-            if (g_pTextFormatTrailing)
-                g_pRenderTarget->DrawTextW(L"Vol", 3, g_pTextFormatTrailing.Get(), labelRect, g_pLineBrush.Get());
-        }
-
-        // draw slider track (adjusted to leave label area)
-        D2D1_RECT_F trackRect = g_sliderRect;
-        trackRect.left = labelRect.right + 8.0f;
-        g_sliderTrackRect = trackRect; // store for interaction
-        if (g_pDarkBrush)
-            g_pRenderTarget->FillRectangle(trackRect, g_pDarkBrush.Get());
-        // value fill
-        D2D1_RECT_F valueRect = trackRect;
-        valueRect.right = valueRect.left + (valueRect.right - valueRect.left) * g_bgmVolume;
-        if (g_pLightBrush)
-            g_pRenderTarget->FillRectangle(valueRect, g_pLightBrush.Get());
-        // solid knob (larger)
-        float knobR = 12.0f;
-        float knobX = valueRect.right;
-        float knobY = (trackRect.top + trackRect.bottom) * 0.5f;
-        if (g_pBeadBrush)
-            g_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(knobX, knobY), knobR, knobR), g_pBeadBrush.Get());
-        if (g_pLineBrush)
-            g_pRenderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(knobX, knobY), knobR, knobR), g_pLineBrush.Get(), 1.0f);
     }
 
     // draw pieces
@@ -950,19 +895,6 @@ void Board_OnMouseMove(int x, int y)
         g_hoverRow = -1; g_hoverCol = -1;
     }
 
-    // if dragging slider, update value
-    if (g_draggingSlider)
-    {
-        float pos = 0.0f;
-        if (g_sliderTrackRect.right > g_sliderTrackRect.left)
-        {
-            pos = (float)(x - g_sliderTrackRect.left) / (g_sliderTrackRect.right - g_sliderTrackRect.left);
-        }
-        if (pos < 0.0f) pos = 0.0f;
-        if (pos > 1.0f) pos = 1.0f;
-        g_bgmVolume = pos;
-    }
-
     // change cursor to hand when hovering over interactive UI buttons, otherwise arrow
     bool overButton = false;
     bool overHistory = PtInRectF(g_btnHistoryRect, x, y);
@@ -1077,19 +1009,6 @@ void Board_OnLButtonDown(int x, int y)
             }
             return;
         }
-        // slider click: if inside slider track, start dragging and set value
-        if (PtInRectF(g_sliderTrackRect, x, y))
-        {
-            PlayWavByName(L"click.wav");
-            float pos = 0.0f;
-            if (g_sliderTrackRect.right > g_sliderTrackRect.left)
-                pos = (float)(x - g_sliderTrackRect.left) / (g_sliderTrackRect.right - g_sliderTrackRect.left);
-            if (pos < 0.0f) pos = 0.0f;
-            if (pos > 1.0f) pos = 1.0f;
-            g_bgmVolume = pos;
-            g_draggingSlider = true;
-            return;
-        }
     }
 
     int row, col;
@@ -1194,11 +1113,6 @@ void Board_OnLButtonDown(int x, int y)
 
 void Board_OnLButtonUp(int x, int y)
 {
-    if (g_draggingSlider)
-    {
-        g_draggingSlider = false;
-        return;
-    }
 }
 
 void Board_OnMouseWheel(int delta)
