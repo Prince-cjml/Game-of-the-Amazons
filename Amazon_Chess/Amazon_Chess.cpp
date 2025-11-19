@@ -371,6 +371,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         break;
+    case WM_ERASEBKGND:
+        // Suppress default background erase to prevent flicker/white flash.
+        return 1;
     case WM_MOUSELEAVE:
         {
             if (g_appMode == MODE_GAME)
@@ -393,8 +396,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             {
                 Board_OnMouseMove(x, y);
             }
-            // keep system cursor visible
-            SetCursor(LoadCursor(nullptr, IDC_ARROW));
             TRACKMOUSEEVENT tme = {};
             tme.cbSize = sizeof(tme);
             tme.dwFlags = TME_LEAVE;
